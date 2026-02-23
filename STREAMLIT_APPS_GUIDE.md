@@ -261,10 +261,13 @@ pip install pillow pdf2image
 
 Create a `.env` file:
 ```env
-AZURE_OPENAI_API_KEY=your_key_here
 AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
 AZURE_OPENAI_DEPLOYMENT=gpt-4o-mini
 ```
+
+Authenticate with Entra ID:
+- Local dev: `az login`
+- Ensure RBAC role **Cognitive Services OpenAI User** is assigned for your identity
 
 ### **Quick Start**
 

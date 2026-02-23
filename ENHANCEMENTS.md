@@ -20,7 +20,6 @@ class AgentConfig:
     """Dynamic agent configuration"""
     endpoint: str
     deployment_name: str
-    api_key: str
     api_version: str = "2024-02-01"
     max_retries: int = 3
     timeout: int = 30
@@ -32,7 +31,6 @@ class AgentConfig:
         return cls(
             endpoint=os.getenv('AZURE_OPENAI_ENDPOINT'),
             deployment_name=os.getenv('AZURE_OPENAI_DEPLOYMENT') or os.getenv('AZURE_OPENAI_DEPLOYMENT_NAME'),
-            api_key=os.getenv('AZURE_OPENAI_API_KEY'),
             api_version=os.getenv('AZURE_OPENAI_API_VERSION', '2024-02-01'),
             max_retries=int(os.getenv('MAX_RETRIES', '3')),
             timeout=int(os.getenv('TIMEOUT', '30')),

@@ -69,7 +69,7 @@ This project demonstrates how to build intelligent invoice processing systems us
 - **Python**: 3.8 or higher (3.11 recommended)
 - **Microsoft Foundry + model endpoint**:
    - A model deployment (created/managed in Microsoft Foundry)
-   - A compatible endpoint + API key to call that deployment
+   - A compatible endpoint and Entra ID (keyless) access to call that deployment
 - **Libraries** (installed via `requirements.txt`):
    - `agent-framework`
    - `python-dotenv`
@@ -80,7 +80,7 @@ This project demonstrates how to build intelligent invoice processing systems us
 1. **Clone the repository**
    ```bash
    git clone <repository-url>
-   cd invoice-agent-demo
+   cd invoice-agent-demo_keyless
    ```
 
 2. **Create virtual environment**
@@ -113,7 +113,6 @@ Create a `.env` file in the project root:
 # Model Endpoint Configuration
 AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
 AZURE_OPENAI_DEPLOYMENT=gpt-4.1-mini
-AZURE_OPENAI_API_KEY=your-api-key-here
 
 # Optional: Advanced Configuration
 AZURE_OPENAI_API_VERSION=2024-02-01
@@ -124,15 +123,26 @@ Notes:
 - `AZURE_OPENAI_DEPLOYMENT` is the preferred variable name. For compatibility, the code also accepts `AZURE_OPENAI_DEPLOYMENT_NAME`.
 - The endpoint must be a resource-style model endpoint (for this repo’s default client: `https://<resource>.openai.azure.com/`). Microsoft Foundry *project* URLs are different and won’t work as `AZURE_OPENAI_ENDPOINT`.
 
+#### Keyless authentication (recommended)
+
+This repo uses keyless auth via Microsoft Entra ID.
+
+1. Ensure your identity has access to the Azure OpenAI resource (RBAC): assign the **Cognitive Services OpenAI User** role on the Azure OpenAI resource (or resource group).
+2. Authenticate:
+   - Local dev: `az login` (or VS Code Azure sign-in)
+   - Azure compute: enable Managed Identity (system-assigned or user-assigned). For user-assigned MI, set `AZURE_CLIENT_ID`.
+
+Optional:
+- `AZURE_OPENAI_TOKEN_ENDPOINT` (defaults to `https://cognitiveservices.azure.com/.default`).
+
 ### Security Best Practices
 
-⚠️ **Never commit your API keys to version control!**
+⚠️ **Never commit secrets to version control!**
 
 - Use environment variables for sensitive data
 - Add `.env` to `.gitignore`
 - Use Managed Identity in production (where supported)
-- Rotate API keys regularly
-- Use Key Vault (or another secret store) for secrets management
+- Use Key Vault (or another secret store) for other secrets (if applicable)
 
 ## 💻 Usage
 
@@ -173,7 +183,7 @@ Each step file demonstrates different capabilities:
 ## 📁 Project Structure
 
 ```
-invoice-agent-demo/
+invoice-agent-demo_keyless/
 ├── client.py                   # Model endpoint client configuration
 ├── step1_basic_agent.py        # Basic invoice summarization
 ├── step2_thread_memory.py      # Conversation memory demo
@@ -256,7 +266,7 @@ def validate_invoice(amount: int, currency: str) -> str:
 ## 🚀 Enhancement Roadmap
 
 ### Phase 1: Core Improvements
-- [ ] Move API keys to a secret store (for example Key Vault)
+- [ ] Centralize config and secrets (if any) in a secret store (for example Key Vault)
 - [ ] Add comprehensive error handling
 - [ ] Implement structured logging
 - [ ] Add unit and integration tests
@@ -287,8 +297,8 @@ def validate_invoice(amount: int, currency: str) -> str:
 ## ✅ Best Practices
 
 ### Security
-- Never hardcode API keys
-- Use environment variables or a secret store (for example Key Vault)
+- Prefer keyless auth (Managed Identity / Entra ID)
+- Use environment variables or a secret store (for example Key Vault) for other secrets
 - Implement least-privilege access
 - Enable audit logging
 - Regular security assessments
@@ -319,9 +329,9 @@ def validate_invoice(amount: int, currency: str) -> str:
 ### Common Issues
 
 **Issue**: `401 Unauthorized` error
-- **Solution**: Check API key is correct and not expired
+- **Solution**: Ensure you are signed in (`az login`) or Managed Identity is enabled
 - Verify endpoint URL is accurate
-- Ensure API key has proper permissions
+- Ensure RBAC is configured (role: **Cognitive Services OpenAI User**)
 
 **Issue**: `404 Resource not found`
 - **Solution**: Verify the deployment/model name matches what you configured in Foundry / your provider portal

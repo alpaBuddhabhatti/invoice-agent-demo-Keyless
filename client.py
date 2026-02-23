@@ -7,10 +7,10 @@ for the invoice processing agent application.
 Configuration:
     - endpoint: Azure OpenAI service endpoint URL
     - deployment_name: Name of the deployed model (e.g., gpt-4, gpt-4.1-mini)
-    - api_key: Authentication key for Azure OpenAI service
+    - credential: Microsoft Entra ID credential (keyless authentication)
 
 Enhancement Suggestions:
-    1. Use environment variables for sensitive data (api_key should not be hardcoded)
+    1. Use managed identity / Entra ID (no secrets in config)
     2. Add retry logic with exponential backoff for API calls
     3. Implement connection pooling for multiple concurrent requests
     4. Add logging for debugging and monitoring
@@ -21,7 +21,9 @@ Enhancement Suggestions:
 """
 
 import os
+
 from dotenv import load_dotenv
+
 from agent_framework.azure import AzureOpenAIChatClient
 
 # Load environment variables from .env file
@@ -29,7 +31,10 @@ load_dotenv()
 
 def get_chat_client():
     """
-    Create and configure an Azure OpenAI chat client with API key authentication.
+    Create and configure an Azure OpenAI chat client.
+
+    Authentication:
+        - Keyless authentication via Microsoft Entra ID (DefaultAzureCredential).
     
     Returns:
         AzureOpenAIChatClient: Configured chat client instance
@@ -53,11 +58,17 @@ def get_chat_client():
         "AZURE_OPENAI_DEPLOYMENT_NAME"
     )
 
-    # API key from environment variables
-    api_key = os.getenv("AZURE_OPENAI_API_KEY")
-
     # Optional API version override.
     api_version = os.getenv("AZURE_OPENAI_API_VERSION")
+
+    # Optional transport settings (passed through to the underlying OpenAI client).
+    # These help avoid "hangs" on network/TLS issues and make behavior predictable.
+    timeout_seconds = os.getenv("AZURE_OPENAI_TIMEOUT_SECONDS")
+    max_retries = os.getenv("AZURE_OPENAI_MAX_RETRIES")
+
+    # Optional token scope/endpoint for Entra ID. Agent Framework defaults this to
+    # https://cognitiveservices.azure.com/.default if not provided.
+    token_endpoint = os.getenv("AZURE_OPENAI_TOKEN_ENDPOINT")
 
     # Validate required configuration
     missing = []
@@ -65,8 +76,6 @@ def get_chat_client():
         missing.append("AZURE_OPENAI_ENDPOINT")
     if not deployment_name:
         missing.append("AZURE_OPENAI_DEPLOYMENT (preferred) or AZURE_OPENAI_DEPLOYMENT_NAME")
-    if not api_key:
-        missing.append("AZURE_OPENAI_API_KEY")
     if missing:
         raise RuntimeError(
             "Missing required environment variables: " + ", ".join(missing)
@@ -77,9 +86,40 @@ def get_chat_client():
     client_kwargs = {
         "endpoint": endpoint,
         "deployment_name": deployment_name,
-        "api_key": api_key,
     }
     if api_version:
         client_kwargs["api_version"] = api_version
+
+    if timeout_seconds:
+        try:
+            client_kwargs["timeout"] = float(timeout_seconds)
+        except ValueError:
+            raise RuntimeError(
+                "AZURE_OPENAI_TIMEOUT_SECONDS must be a number (seconds), e.g. 30 or 60."
+            )
+    if max_retries:
+        try:
+            client_kwargs["max_retries"] = int(max_retries)
+        except ValueError:
+            raise RuntimeError(
+                "AZURE_OPENAI_MAX_RETRIES must be an integer, e.g. 0, 2, 5."
+            )
+
+    # Keyless authentication using Microsoft Entra ID.
+    try:
+        from azure.identity import DefaultAzureCredential
+    except Exception as e:  # pragma: no cover
+        raise RuntimeError(
+            "Keyless auth requires azure-identity. Install it with `pip install azure-identity` "
+            "or add it to requirements.txt."
+        ) from e
+
+    # DefaultAzureCredential supports:
+    # - Local dev: Azure CLI / VS Code sign-in
+    # - Azure: Managed Identity (system- or user-assigned)
+    credential = DefaultAzureCredential()
+    client_kwargs["credential"] = credential
+    if token_endpoint:
+        client_kwargs["token_endpoint"] = token_endpoint
 
     return AzureOpenAIChatClient(**client_kwargs)
