@@ -1,125 +1,237 @@
-"""
-Azure OpenAI Chat Client Configuration
-=======================================
-This module provides a centralized way to configure and create Azure OpenAI chat clients
-for the invoice processing agent application.
+"""Foundry client configuration (keyless)
+========================================
 
-Configuration:
-    - endpoint: Azure OpenAI service endpoint URL
-    - deployment_name: Name of the deployed model (e.g., gpt-4, gpt-4.1-mini)
-    - credential: Microsoft Entra ID credential (keyless authentication)
+This repo is keyless-only and uses Microsoft Entra ID credentials to call
+Microsoft Foundry (Azure AI Foundry) project endpoints.
 
-Enhancement Suggestions:
-    1. Use managed identity / Entra ID (no secrets in config)
-    2. Add retry logic with exponential backoff for API calls
-    3. Implement connection pooling for multiple concurrent requests
-    4. Add logging for debugging and monitoring
-    5. Support multiple deployment configurations (dev, staging, prod)
-    6. Add API version configuration for better version control
-    7. Implement rate limiting to avoid quota exhaustion
-    8. Add health check functionality to verify endpoint availability
+Primary clients:
+- `AIProjectClient` (azure-ai-projects): project-scoped access and `get_openai_client()`
+- `AgentsClient` (azure-ai-agents): create agents/threads/runs and fetch messages
+
+Env vars:
+- Project endpoint: `FOUNDRY_PROJECT_ENDPOINT` (preferred), or `PROJECT_ENDPOINT`, or `AZURE_AI_PROJECT_ENDPOINT`
+- Model deployment: `MODEL_DEPLOYMENT_NAME` (preferred), or `AZURE_OPENAI_DEPLOYMENT`, or `AZURE_OPENAI_DEPLOYMENT_NAME`
+
+Auth:
+- Local dev: `az login` (or VS Code Azure sign-in)
+- Azure: Managed Identity (optional `AZURE_CLIENT_ID` for user-assigned identity)
 """
+
+from __future__ import annotations
 
 import os
+from typing import Optional
 
 from dotenv import load_dotenv
 
-from agent_framework.azure import AzureOpenAIChatClient
 
-# Load environment variables from .env file
 load_dotenv()
 
-def get_chat_client():
-    """
-    Create and configure an Azure OpenAI chat client.
 
-    Authentication:
-        - Keyless authentication via Microsoft Entra ID (DefaultAzureCredential).
-    
-    Returns:
-        AzureOpenAIChatClient: Configured chat client instance
-        
-    Raises:
-        RuntimeError: If required configuration is missing
-        
-    Enhancement Ideas:
-        - Add caching to reuse client instances
-        - Support alternative authentication methods (Managed Identity, Service Principal)
-        - Add client configuration validation
-        - Implement fallback to different deployments if primary fails
-    """
-    # Azure OpenAI endpoint (without /openai/v1/ suffix for AzureOpenAIChatClient)
-    endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
-
-    # Deployment name - the model deployed in Azure OpenAI.
-    # Prefer AZURE_OPENAI_DEPLOYMENT, but accept AZURE_OPENAI_DEPLOYMENT_NAME
-    # for compatibility with older docs/config.
-    deployment_name = os.getenv("AZURE_OPENAI_DEPLOYMENT") or os.getenv(
-        "AZURE_OPENAI_DEPLOYMENT_NAME"
+def get_project_endpoint() -> str:
+    endpoint = (
+        os.getenv("FOUNDRY_PROJECT_ENDPOINT")
+        or os.getenv("PROJECT_ENDPOINT")
+        or os.getenv("AZURE_AI_PROJECT_ENDPOINT")
     )
-
-    # Optional API version override.
-    api_version = os.getenv("AZURE_OPENAI_API_VERSION")
-
-    # Optional transport settings (passed through to the underlying OpenAI client).
-    # These help avoid "hangs" on network/TLS issues and make behavior predictable.
-    timeout_seconds = os.getenv("AZURE_OPENAI_TIMEOUT_SECONDS")
-    max_retries = os.getenv("AZURE_OPENAI_MAX_RETRIES")
-
-    # Optional token scope/endpoint for Entra ID. Agent Framework defaults this to
-    # https://cognitiveservices.azure.com/.default if not provided.
-    token_endpoint = os.getenv("AZURE_OPENAI_TOKEN_ENDPOINT")
-
-    # Validate required configuration
-    missing = []
     if not endpoint:
-        missing.append("AZURE_OPENAI_ENDPOINT")
-    if not deployment_name:
-        missing.append("AZURE_OPENAI_DEPLOYMENT (preferred) or AZURE_OPENAI_DEPLOYMENT_NAME")
-    if missing:
         raise RuntimeError(
-            "Missing required environment variables: " + ", ".join(missing)
+            "Missing Foundry project endpoint. Set FOUNDRY_PROJECT_ENDPOINT (preferred) "
+            "or PROJECT_ENDPOINT (or AZURE_AI_PROJECT_ENDPOINT)."
         )
+    return endpoint
 
-    # Create and return the Azure OpenAI chat client
-    # Note: AzureOpenAIChatClient automatically handles API versioning
-    client_kwargs = {
-        "endpoint": endpoint,
-        "deployment_name": deployment_name,
-    }
-    if api_version:
-        client_kwargs["api_version"] = api_version
 
-    if timeout_seconds:
-        try:
-            client_kwargs["timeout"] = float(timeout_seconds)
-        except ValueError:
-            raise RuntimeError(
-                "AZURE_OPENAI_TIMEOUT_SECONDS must be a number (seconds), e.g. 30 or 60."
-            )
-    if max_retries:
-        try:
-            client_kwargs["max_retries"] = int(max_retries)
-        except ValueError:
-            raise RuntimeError(
-                "AZURE_OPENAI_MAX_RETRIES must be an integer, e.g. 0, 2, 5."
-            )
+def get_model_deployment_name() -> str:
+    model = (
+        os.getenv("MODEL_DEPLOYMENT_NAME")
+        or os.getenv("AZURE_OPENAI_DEPLOYMENT")
+        or os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
+    )
+    if not model:
+        raise RuntimeError(
+            "Missing model deployment name. Set MODEL_DEPLOYMENT_NAME (preferred) "
+            "or AZURE_OPENAI_DEPLOYMENT (or AZURE_OPENAI_DEPLOYMENT_NAME)."
+        )
+    return model
 
-    # Keyless authentication using Microsoft Entra ID.
+
+def get_credential():
     try:
         from azure.identity import DefaultAzureCredential
     except Exception as e:  # pragma: no cover
         raise RuntimeError(
-            "Keyless auth requires azure-identity. Install it with `pip install azure-identity` "
-            "or add it to requirements.txt."
+            "Keyless auth requires azure-identity. Install it with `pip install azure-identity`."
         ) from e
 
-    # DefaultAzureCredential supports:
-    # - Local dev: Azure CLI / VS Code sign-in
-    # - Azure: Managed Identity (system- or user-assigned)
-    credential = DefaultAzureCredential()
-    client_kwargs["credential"] = credential
-    if token_endpoint:
-        client_kwargs["token_endpoint"] = token_endpoint
+    return DefaultAzureCredential()
 
-    return AzureOpenAIChatClient(**client_kwargs)
+
+def get_project_client():
+    try:
+        from azure.ai.projects import AIProjectClient
+    except Exception as e:  # pragma: no cover
+        raise RuntimeError(
+            "Foundry project access requires azure-ai-projects. Install it with `pip install azure-ai-projects`."
+        ) from e
+
+    return AIProjectClient(endpoint=get_project_endpoint(), credential=get_credential())
+
+
+def get_openai_client():
+    return get_project_client().get_openai_client()
+
+
+def get_agents_client():
+    try:
+        from azure.ai.agents import AgentsClient
+    except Exception as e:  # pragma: no cover
+        raise RuntimeError(
+            "Foundry Agents access requires azure-ai-agents. Install it with `pip install azure-ai-agents`."
+        ) from e
+
+    return AgentsClient(endpoint=get_project_endpoint(), credential=get_credential())
+
+
+def _find_agent_by_name(agents_client, name: str):
+    for agent in agents_client.list_agents(limit=100):
+        if getattr(agent, "name", None) == name:
+            return agent
+    return None
+
+
+def ensure_agent(
+    agents_client,
+    *,
+    name: str,
+    instructions: str,
+    model: Optional[str] = None,
+    description: Optional[str] = None,
+    toolset=None,
+):
+    existing = _find_agent_by_name(agents_client, name)
+    if existing is not None:
+        return existing
+
+    return agents_client.create_agent(
+        name=name,
+        model=model or get_model_deployment_name(),
+        instructions=instructions,
+        description=description,
+        toolset=toolset,
+    )
+
+
+def create_thread(agents_client, *, initial_user_message: Optional[str] = None) -> str:
+    from azure.ai.agents import models as m
+
+    messages = None
+    if initial_user_message:
+        messages = [
+            m.ThreadMessageOptions(role=m.MessageRole.USER, content=initial_user_message)
+        ]
+    thread = agents_client.threads.create(messages=messages)
+    return thread.id
+
+
+def get_last_assistant_text(agents_client, *, thread_id: str) -> str:
+    from azure.ai.agents import models as m
+
+    content = agents_client.messages.get_last_message_text_by_role(
+        thread_id=thread_id, role=m.MessageRole.AGENT
+    )
+    if not content:
+        return ""
+
+    try:
+        return content.text.value
+    except Exception:
+        return str(content)
+
+
+def run_agent_turn(
+    agents_client,
+    *,
+    agent_id: str,
+    thread_id: str,
+    user_text: str,
+    toolset=None,
+    instructions: Optional[str] = None,
+) -> str:
+    from azure.ai.agents import models as m
+
+    def _response_text(resp) -> str:
+        try:
+            text = resp.text()
+            return text if isinstance(text, str) else str(text)
+        except TypeError:
+            text = resp.text
+            return text if isinstance(text, str) else str(text)
+        except Exception:
+            try:
+                raw = resp.read()
+                if isinstance(raw, (bytes, bytearray)):
+                    return raw.decode("utf-8", errors="replace")
+                return str(raw)
+            except Exception:
+                return "<unable to read response body>"
+
+    def _raw_call(func, *args, **kwargs):
+        return func(*args, cls=lambda resp, *_a, **_k: resp, **kwargs)
+
+    try:
+        agents_client.messages.create(
+            thread_id=thread_id,
+            role=m.MessageRole.USER,
+            content=user_text,
+        )
+    except Exception as e:
+        try:
+            resp = _raw_call(
+                agents_client.messages.create,
+                thread_id,
+                role=m.MessageRole.USER,
+                content=user_text,
+            )
+            body = _response_text(resp)
+            raise RuntimeError(
+                "Failed to create thread message. "
+                f"HTTP {getattr(resp, 'status_code', '???')} {getattr(resp, 'reason', '')}\n"
+                f"Endpoint: {get_project_endpoint()}\n"
+                f"Response (first 500 chars): {body[:500]}"
+            ) from e
+        except RuntimeError:
+            raise
+        except Exception:
+            raise
+
+    try:
+        agents_client.runs.create_and_process(
+            thread_id=thread_id,
+            agent_id=agent_id,
+            instructions=instructions,
+            toolset=toolset,
+        )
+    except Exception as e:
+        try:
+            resp = _raw_call(
+                agents_client.runs.create_and_process,
+                thread_id,
+                agent_id=agent_id,
+                instructions=instructions,
+                toolset=toolset,
+            )
+            body = _response_text(resp)
+            raise RuntimeError(
+                "Failed to create/process run. "
+                f"HTTP {getattr(resp, 'status_code', '???')} {getattr(resp, 'reason', '')}\n"
+                f"Endpoint: {get_project_endpoint()}\n"
+                f"Response (first 500 chars): {body[:500]}"
+            ) from e
+        except RuntimeError:
+            raise
+        except Exception:
+            raise
+
+    return get_last_assistant_text(agents_client, thread_id=thread_id)
+

@@ -28,15 +28,11 @@ Enhancement Suggestions:
     10. Implement multi-currency conversion tools
 """
 
-import asyncio
-from agent_framework import Agent, tool
-from client import get_chat_client
+from azure.ai.agents.models import FunctionTool, ToolSet
+
+from client import create_thread, ensure_agent, get_agents_client, run_agent_turn
 
 # Tool 1: Invoice Extraction
-@tool(
-    name='extract_invoice', 
-    description='Extract structured data from invoice text'
-)
 def extract_invoice(text: str) -> dict:
     """
     Extract key invoice fields from text input.
@@ -62,10 +58,6 @@ def extract_invoice(text: str) -> dict:
     }
 
 # Tool 2: Invoice Validation
-@tool(
-    name='validate_invoice', 
-    description='Validate invoice amount and currency for approval'
-)
 def validate_invoice(amount: int, currency: str) -> str:
     """
     Validate invoice based on business rules.
@@ -91,7 +83,7 @@ def validate_invoice(amount: int, currency: str) -> str:
     # Enhancement: Add real validation rules
     return 'APPROVED'
 
-async def main():
+def main():
     """
     Main function demonstrating multi-tool agent workflow.
     
@@ -102,26 +94,46 @@ async def main():
         - Support parallel tool execution where possible
         - Add tool execution timeout handling
     """
-    # Create agent with multiple tools
-    # The agent will orchestrate tool usage automatically
-    agent = Agent(
-        client=get_chat_client(), 
-        instructions='Process invoices.', 
-        tools=[extract_invoice, validate_invoice]
+    agents_client = get_agents_client()
+
+    toolset = ToolSet()
+    toolset.add(FunctionTool({extract_invoice, validate_invoice}))
+    # Required for local Python tool execution: allows the SDK to run tool calls and submit outputs.
+    agents_client.enable_auto_function_calls(toolset)
+
+    invoice_text = """INVOICE\nVendor: Contoso\nInvoice Number: INV-1001\nDate: 2026-02-23\nTotal Due: 1200 USD\n"""
+
+    agent = ensure_agent(
+        agents_client,
+        # Use a distinct name so we don't accidentally reuse an older agent with different instructions.
+        name="InvoiceWorkflowAgent_Step3_MultiTools",
+        instructions=(
+            "You are an invoice processing workflow agent.\n"
+            "The user will provide invoice TEXT in the message. Do NOT ask for an invoice document or image.\n"
+            "Workflow (always follow):\n"
+            "1) Call extract_invoice(invoice_text) using the provided invoice text.\n"
+            "2) Call validate_invoice(amount, currency) using the extracted fields.\n"
+            "Then respond with a short summary containing vendor, amount, currency, and the validation result."
+        ),
+        toolset=toolset,
     )
-    
-    # Single request triggers multi-step workflow:
-    # 1. Agent calls extract_invoice() to get structured data
-    # 2. Agent calls validate_invoice() with extracted data
-    # 3. Agent synthesizes results into natural language response
-    result = await agent.run('Process invoice from Contoso for 1200 USD')
-    
-    # Display the final result
-    print(result.text)
+
+    thread_id = create_thread(agents_client)
+    text = run_agent_turn(
+        agents_client,
+        agent_id=agent.id,
+        thread_id=thread_id,
+        user_text=(
+            "Process this invoice text end-to-end (extract then validate):\n\n"
+            f"{invoice_text}"
+        ),
+        toolset=toolset,
+    )
+    print(text)
     
     # Enhancement: Access intermediate tool results
     # Enhancement: Implement custom workflow logic
 
 # Entry point for the script
 if __name__ == '__main__':
-    asyncio.run(main())
+    main()

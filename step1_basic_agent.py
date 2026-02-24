@@ -23,39 +23,29 @@ Enhancement Suggestions:
     10. Create a REST API endpoint for web integration
 """
 
-import asyncio
-from agent_framework import Agent
-from client import get_chat_client
+from client import create_thread, ensure_agent, get_agents_client, run_agent_turn
 
-async def main():
-    """
-    Main function that creates and runs the basic invoice agent.
-    
-    Enhancement Ideas:
-        - Add try-except blocks for error handling
-        - Support command-line arguments for invoice input
-        - Add timing metrics to track performance
-        - Save results to a database or file
-    """
-    # Create agent with basic summarization instructions
-    # The agent uses the Azure OpenAI client configured in client.py
-    agent = Agent(
-        client=get_chat_client(),
-        instructions='Summarize invoice data.'
+def main():
+    """Create and run the basic invoice agent using Foundry Agents."""
+
+    agents_client = get_agents_client()
+    agent = ensure_agent(
+        agents_client,
+        name="BasicInvoiceAgent",
+        instructions="Summarize invoice data.",
     )
-    
-    # Sample invoice data (hardcoded for demo)
-    # Enhancement: Read from file, database, or API
-    invoice = 'Invoice INV-1001 from Contoso for 1200 USD'
-    
-    # Run the agent to process the invoice
-    # The agent will use the LLM to understand and summarize the invoice
-    result = await agent.run(invoice)
-    
-    # Display the result
-    # Enhancement: Format output, save to file, or send to downstream systems
-    print(result.text)
+
+    thread_id = create_thread(agents_client)
+
+    invoice = "Invoice INV-1001 from Contoso for 1200 USD"
+    text = run_agent_turn(
+        agents_client,
+        agent_id=agent.id,
+        thread_id=thread_id,
+        user_text=invoice,
+    )
+    print(text)
 
 # Entry point for the script
 if __name__ == '__main__':
-    asyncio.run(main())
+    main()

@@ -28,16 +28,12 @@ Enhancement Suggestions:
     10. Integrate with accounting systems (QuickBooks, SAP)
 """
 
-import asyncio
-from agent_framework import Agent, tool
-from client import get_chat_client
+from azure.ai.agents.models import FunctionTool, ToolSet
+
+from client import create_thread, ensure_agent, get_agents_client, run_agent_turn
 
 # Define a custom tool for invoice extraction
 # The @tool decorator makes this function available to the agent
-@tool(
-    name="extract_invoice",
-    description="Extracts structured invoice data from text or documents"
-)
 def extract_invoice(text: str) -> dict:
     """
     Extract structured invoice data from text input.
@@ -65,7 +61,7 @@ def extract_invoice(text: str) -> dict:
         # Enhancement: Add invoice_number, date, tax_amount, line_items, etc.
     }
 
-async def main():
+def main():
     """
     Main function demonstrating agent with custom tool.
     
@@ -75,30 +71,38 @@ async def main():
         - Log tool usage for analytics
         - Support async tools for I/O operations
     """
-    # Create agent with extraction instructions and tools
-    # The agent knows when to use the extract_invoice tool
-    agent = Agent(
-        client=get_chat_client(),
+    agents_client = get_agents_client()
+
+    toolset = ToolSet()
+    toolset.add(FunctionTool({extract_invoice}))
+    # Required for local Python tool execution: allows the SDK to run tool calls and submit outputs.
+    agents_client.enable_auto_function_calls(toolset)
+
+    agent = ensure_agent(
+        agents_client,
+        name="InvoiceExtractionAgent",
         instructions=(
             "Extract invoice details accurately. "
             "When invoice text is provided, call the extract_invoice tool first, "
             "then summarize the extracted fields."
         ),
-        tools=[extract_invoice]  # Register the tool
+        toolset=toolset,
     )
 
-    # Run the agent with a request that triggers tool usage
-    # The agent will automatically call extract_invoice() when appropriate
+    thread_id = create_thread(agents_client)
     invoice_text = "Invoice INV-1001 from Contoso Ltd for 1200 USD"
-    result = await agent.run(f"Extract invoice details from: {invoice_text}")
-    
-    # Display the result
-    # The agent will present the extracted data in a natural language format
-    print(result.text)
+    text = run_agent_turn(
+        agents_client,
+        agent_id=agent.id,
+        thread_id=thread_id,
+        user_text=f"Extract invoice details from: {invoice_text}",
+        toolset=toolset,
+    )
+    print(text)
     
     # Enhancement: Access raw tool results for programmatic use
     # Enhancement: Chain multiple tool calls together
 
 # Entry point for the script
 if __name__ == '__main__':
-    asyncio.run(main())
+    main()

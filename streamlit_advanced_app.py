@@ -45,6 +45,13 @@ try:
 except ImportError:
     OCR_SUPPORT = False
 
+# Numpy (used for OCR image arrays)
+try:
+    import numpy as np
+    NUMPY_SUPPORT = True
+except ImportError:
+    NUMPY_SUPPORT = False
+
 # Image support
 try:
     from PIL import Image
@@ -59,11 +66,14 @@ try:
 except ImportError:
     EXCEL_SUPPORT = False
 
-from agent_framework import Agent
-from client import get_chat_client
+from client import create_thread, ensure_agent, get_agents_client, run_agent_turn
 
 
 # ==================== Utility Functions ====================
+
+@st.cache_resource
+def _agents_client():
+    return get_agents_client()
 
 def _run_async(coro):
     """Run an async coroutine safely from Streamlit."""
@@ -89,13 +99,14 @@ def get_ocr_reader():
 
 def extract_text_from_image(image_bytes: bytes) -> str:
     """Extract text from image using OCR."""
-    if not OCR_SUPPORT or not PIL_SUPPORT:
+    if not OCR_SUPPORT or not PIL_SUPPORT or not NUMPY_SUPPORT:
         return "[OCR not available - install easyocr and pillow]"
 
     try:
-        image = Image.open(io.BytesIO(image_bytes))
+        image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        image_array = np.array(image)
         reader = get_ocr_reader()
-        results = reader.readtext(image)
+        results = reader.readtext(image_array)
         text = '\n'.join([line[1] for line in results])
         return text if text.strip() else "[No text detected in image]"
     except Exception as e:
@@ -160,12 +171,12 @@ def extract_data_from_json(json_bytes: bytes) -> str:
         return f"[Error reading JSON: {str(e)}]"
 
 
-def get_llm_agent() -> Agent:
-    """Create LLM agent for document analysis."""
-    if "llm_agent" not in st.session_state:
-        client = get_chat_client()
-        st.session_state.llm_agent = Agent(
-            client=client,
+def get_llm_agent_id() -> str:
+    """Get or create the Foundry agent used for document analysis."""
+    if "llm_agent_id" not in st.session_state:
+        agents_client = _agents_client()
+        agent = ensure_agent(
+            agents_client,
             name="DocumentAnalyst",
             instructions=(
                 "You are an expert document analyst. Your role is to:\n"
@@ -180,27 +191,28 @@ def get_llm_agent() -> Agent:
                 "and ask for clarification if needed."
             ),
         )
-    return st.session_state.llm_agent
+        st.session_state.llm_agent_id = agent.id
+    return st.session_state.llm_agent_id
 
 
 def get_thread():
-    """Get or create conversation thread."""
-    if "analysis_thread" not in st.session_state:
-        st.session_state.analysis_thread = get_llm_agent().get_new_thread()
-    return st.session_state.analysis_thread
+    """Get or create conversation thread (Foundry thread id)."""
+    if "analysis_thread_id" not in st.session_state:
+        st.session_state.analysis_thread_id = create_thread(_agents_client())
+    return st.session_state.analysis_thread_id
 
 
 def analyze_with_llm(prompt: str, use_thread: bool = True) -> str:
     """Run LLM analysis."""
-    agent = get_llm_agent()
-    thread = get_thread() if use_thread else None
-    
-    if thread:
-        result = _run_async(agent.run(prompt, thread=thread))
-    else:
-        result = _run_async(agent.run(prompt))
-    
-    return result.text
+    agents_client = _agents_client()
+    agent_id = get_llm_agent_id()
+    thread_id = get_thread() if use_thread else create_thread(agents_client)
+    return run_agent_turn(
+        agents_client,
+        agent_id=agent_id,
+        thread_id=thread_id,
+        user_text=prompt,
+    )
 
 
 # ==================== File Processing ====================

@@ -27,47 +27,35 @@ Enhancement Suggestions:
     10. Support branching conversations (what-if scenarios)
 """
 
-import asyncio
-from agent_framework import Agent
-from client import get_chat_client
+from client import create_thread, ensure_agent, get_agents_client, run_agent_turn
 
-async def main():
-    """
-    Main function demonstrating thread-based conversation memory.
-    
-    Enhancement Ideas:
-        - Load existing threads from storage
-        - Add thread metadata (created_at, user_id, tags)
-        - Implement thread lifecycle management
-        - Add conversation quality scoring
-    """
-    # Create agent with instructions for answering invoice questions
-    # This agent is designed for interactive Q&A about invoices
-    agent = Agent(
-        client=get_chat_client(),
-        instructions='Answer invoice questions.'
+def main():
+    """Demonstrate thread-based memory using Foundry threads + runs."""
+
+    agents_client = get_agents_client()
+    agent = ensure_agent(
+        agents_client,
+        name="InvoiceQnAAgent",
+        instructions="Answer invoice questions.",
     )
-    
-    # Create a new thread (conversation session)
-    # The thread maintains message history for context
-    # Enhancement: Load thread by ID to continue previous conversations
-    thread = agent.get_new_thread()
-    
-    # First interaction: Provide invoice information
-    # This establishes context in the thread
-    await agent.run('Invoice from Contoso for 1200 USD', thread=thread)
-    
-    # Second interaction: Ask a follow-up question
-    # The agent can answer because it remembers the previous message
-    result = await agent.run('What is the total amount?', thread=thread)
-    
-    # Display the answer
-    # The agent should respond with "1200 USD" using the context from the thread
-    print(result.text)
-    
-    # Enhancement: Save thread for future use
-    # Enhancement: Add more follow-up questions to demonstrate memory
+
+    thread_id = create_thread(agents_client)
+
+    run_agent_turn(
+        agents_client,
+        agent_id=agent.id,
+        thread_id=thread_id,
+        user_text="Invoice from Contoso for 1200 USD",
+    )
+
+    text = run_agent_turn(
+        agents_client,
+        agent_id=agent.id,
+        thread_id=thread_id,
+        user_text="What is the total amount?",
+    )
+    print(text)
 
 # Entry point for the script
 if __name__ == '__main__':
-    asyncio.run(main())
+    main()

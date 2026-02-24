@@ -49,44 +49,41 @@ try:
 except ImportError:
     PDF_SUPPORT = False
 
-from agent_framework import Agent
-from client import get_chat_client
+from client import create_thread, ensure_agent, get_agents_client, run_agent_turn
 
 load_dotenv()
 
 # ==================== Agent Configurations ====================
 
-def get_extraction_agent() -> Agent:
+def get_extraction_agent_id() -> str:
     """Agent specialized in extracting data from documents (text + vision)."""
-    if "extraction_agent" not in st.session_state:
-        client = get_chat_client()
-        st.session_state.extraction_agent = Agent(
-            client=client,
+    if "extraction_agent_id" not in st.session_state:
+        agent = ensure_agent(
+            _agents_client(),
             name="ExtractionAgent",
             instructions=(
                 "You are an expert data extraction specialist.\n"
                 "Your role:\n"
                 "1. Extract ALL structured and unstructured data from documents\n"
-                "2. Use vision capabilities for images and PDFs\n"
-                "3. Identify document type (invoice, receipt, form, table, etc.)\n"
-                "4. Return data in structured JSON format with these fields:\n"
+                "2. Identify document type (invoice, receipt, form, table, etc.)\n"
+                "3. Return data in structured JSON format with these fields:\n"
                 "   - document_type: Type of document\n"
                 "   - confidence: Extraction confidence (0-100)\n"
-                "   - extracted_fields: Dict of key-value pairs\n"
+                "   - extracted_fields: Dict of key-value pairs found\n"
                 "   - raw_text: All text found\n"
                 "   - notes: Any extraction issues or ambiguities\n"
                 "Be thorough and flag low-confidence extractions."
             ),
         )
-    return st.session_state.extraction_agent
+        st.session_state.extraction_agent_id = agent.id
+    return st.session_state.extraction_agent_id
 
 
-def get_data_agent() -> Agent:
+def get_data_agent_id() -> str:
     """Agent specialized in retrieving, structuring, and organizing data."""
-    if "data_agent" not in st.session_state:
-        client = get_chat_client()
-        st.session_state.data_agent = Agent(
-            client=client,
+    if "data_agent_id" not in st.session_state:
+        agent = ensure_agent(
+            _agents_client(),
             name="DataAgent",
             instructions=(
                 "You are a data organization and retrieval specialist.\n"
@@ -100,15 +97,15 @@ def get_data_agent() -> Agent:
                 "Return structured data ready for analysis."
             ),
         )
-    return st.session_state.data_agent
+        st.session_state.data_agent_id = agent.id
+    return st.session_state.data_agent_id
 
 
-def get_analyst_agent() -> Agent:
+def get_analyst_agent_id() -> str:
     """Agent specialized in analyzing data and providing insights."""
-    if "analyst_agent" not in st.session_state:
-        client = get_chat_client()
-        st.session_state.analyst_agent = Agent(
-            client=client,
+    if "analyst_agent_id" not in st.session_state:
+        agent = ensure_agent(
+            _agents_client(),
             name="AnalystAgent",
             instructions=(
                 "You are a senior data analyst and business intelligence expert.\n"
@@ -122,15 +119,15 @@ def get_analyst_agent() -> Agent:
                 "Present findings clearly with supporting evidence."
             ),
         )
-    return st.session_state.analyst_agent
+        st.session_state.analyst_agent_id = agent.id
+    return st.session_state.analyst_agent_id
 
 
-def get_validation_agent() -> Agent:
+def get_validation_agent_id() -> str:
     """Agent specialized in validating extracted data quality."""
-    if "validation_agent" not in st.session_state:
-        client = get_chat_client()
-        st.session_state.validation_agent = Agent(
-            client=client,
+    if "validation_agent_id" not in st.session_state:
+        agent = ensure_agent(
+            _agents_client(),
             name="ValidationAgent",
             instructions=(
                 "You are a data quality assurance specialist.\n"
@@ -144,10 +141,15 @@ def get_validation_agent() -> Agent:
                 "Return a validation report with issues and confidence scores."
             ),
         )
-    return st.session_state.validation_agent
+        st.session_state.validation_agent_id = agent.id
+    return st.session_state.validation_agent_id
 
 
 # ==================== Utility Functions ====================
+
+@st.cache_resource
+def _agents_client():
+    return get_agents_client()
 
 def _run_async(coro):
     """Run an async coroutine safely from Streamlit."""
@@ -348,7 +350,8 @@ def evaluate_workflow_controls(
 
 def process_with_vision_agent(file_bytes: bytes, file_name: str, file_type: str) -> dict:
     """Process images/PDFs using vision-capable extraction agent."""
-    agent = get_extraction_agent()
+    agents_client = _agents_client()
+    agent_id = get_extraction_agent_id()
     
     # For multi-modal, we need to properly format the message
     # Note: This depends on your agent_framework supporting vision
@@ -369,19 +372,26 @@ def process_with_vision_agent(file_bytes: bytes, file_name: str, file_type: str)
         f"\n[Image data encoded as base64: {encoded_image[:100]}...]"
     )
     
-    result = _run_async(agent.run(prompt))
+    thread_id = create_thread(agents_client)
+    text = run_agent_turn(
+        agents_client,
+        agent_id=agent_id,
+        thread_id=thread_id,
+        user_text=prompt,
+    )
     
     return {
         "agent": "ExtractionAgent",
         "mode": "vision",
-        "result": result.text,
+        "result": text,
         "timestamp": datetime.now().isoformat()
     }
 
 
 def process_with_text_agent(file_bytes: bytes, file_name: str) -> dict:
     """Process text documents using extraction agent."""
-    agent = get_extraction_agent()
+    agents_client = _agents_client()
+    agent_id = get_extraction_agent_id()
     
     try:
         text_content = file_bytes.decode('utf-8')
@@ -395,19 +405,26 @@ def process_with_text_agent(file_bytes: bytes, file_name: str) -> dict:
         f"Return structured JSON with extracted data."
     )
     
-    result = _run_async(agent.run(prompt))
+    thread_id = create_thread(agents_client)
+    text = run_agent_turn(
+        agents_client,
+        agent_id=agent_id,
+        thread_id=thread_id,
+        user_text=prompt,
+    )
     
     return {
         "agent": "ExtractionAgent",
         "mode": "text",
-        "result": result.text,
+        "result": text,
         "timestamp": datetime.now().isoformat()
     }
 
 
 def process_with_data_agent(file_bytes: bytes, file_name: str, file_type: str) -> dict:
     """Process structured data files using data agent."""
-    agent = get_data_agent()
+    agents_client = _agents_client()
+    agent_id = get_data_agent_id()
     
     # Parse the data first
     if file_type == "text/csv":
@@ -432,12 +449,18 @@ def process_with_data_agent(file_bytes: bytes, file_name: str, file_type: str) -
         f"4. Structured JSON representation"
     )
     
-    result = _run_async(agent.run(prompt))
+    thread_id = create_thread(agents_client)
+    text = run_agent_turn(
+        agents_client,
+        agent_id=agent_id,
+        thread_id=thread_id,
+        user_text=prompt,
+    )
     
     return {
         "agent": "DataAgent",
         "mode": "data",
-        "result": result.text,
+        "result": text,
         "dataframe": df if file_type == "text/csv" else None,
         "timestamp": datetime.now().isoformat()
     }
@@ -445,7 +468,8 @@ def process_with_data_agent(file_bytes: bytes, file_name: str, file_type: str) -
 
 def validate_extraction(extraction_result: str, file_name: str) -> dict:
     """Validate extracted data using validation agent."""
-    agent = get_validation_agent()
+    agents_client = _agents_client()
+    agent_id = get_validation_agent_id()
     
     prompt = (
         f"Validate this extracted data:\n"
@@ -459,18 +483,25 @@ def validate_extraction(extraction_result: str, file_name: str) -> dict:
         f"5. Overall quality score"
     )
     
-    result = _run_async(agent.run(prompt))
+    thread_id = create_thread(agents_client)
+    text = run_agent_turn(
+        agents_client,
+        agent_id=agent_id,
+        thread_id=thread_id,
+        user_text=prompt,
+    )
     
     return {
         "agent": "ValidationAgent",
-        "result": result.text,
+        "result": text,
         "timestamp": datetime.now().isoformat()
     }
 
 
 def analyze_data(data_results: List[dict], analysis_type: str = "summary") -> dict:
     """Analyze extracted data using analyst agent."""
-    agent = get_analyst_agent()
+    agents_client = _agents_client()
+    agent_id = get_analyst_agent_id()
     
     # Combine all extraction results
     combined_data = "\n---DOCUMENT BREAK---\n".join([
@@ -501,12 +532,18 @@ def analyze_data(data_results: List[dict], analysis_type: str = "summary") -> di
     else:
         prompt = f"Analyze this data:\n{combined_data}"
     
-    result = _run_async(agent.run(prompt))
+    thread_id = create_thread(agents_client)
+    text = run_agent_turn(
+        agents_client,
+        agent_id=agent_id,
+        thread_id=thread_id,
+        user_text=prompt,
+    )
     
     return {
         "agent": "AnalystAgent",
         "analysis_type": analysis_type,
-        "result": result.text,
+        "result": text,
         "timestamp": datetime.now().isoformat()
     }
 

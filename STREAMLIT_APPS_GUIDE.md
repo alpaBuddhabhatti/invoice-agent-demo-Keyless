@@ -249,20 +249,18 @@ streamlit run streamlit_multi_agent_app.py
 ```bash
 # Recommended (all apps)
 pip install -r requirements.txt
-
-# For Advanced App (OCR)
-pip install easyocr pillow openpyxl
-
-# For PDF preview
-pip install pillow pdf2image
+pip check
 ```
 
 ### **Environment Setup**
 
 Create a `.env` file:
 ```env
-AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
-AZURE_OPENAI_DEPLOYMENT=gpt-4o-mini
+# Foundry project endpoint (preferred)
+FOUNDRY_PROJECT_ENDPOINT=https://<your-project>.services.ai.azure.com/api/projects/<project>
+
+# Model deployment name in your Foundry project
+MODEL_DEPLOYMENT_NAME=<your-deployment-name>
 ```
 
 Authenticate with Entra ID:
@@ -273,13 +271,13 @@ Authenticate with Entra ID:
 
 ```bash
 # Try the simplest first
-streamlit run streamlit_advanced_app.py
+python -m streamlit run streamlit_advanced_app.py
 
 # Then test prompt-only LLM extraction
-streamlit run streamlit_llm_extraction_app.py
+python -m streamlit run streamlit_llm_extraction_app.py
 
 # Finally explore multi-agent
-streamlit run streamlit_multi_agent_app.py
+python -m streamlit run streamlit_multi_agent_app.py
 ```
 
 ---
@@ -355,11 +353,27 @@ streamlit run streamlit_multi_agent_app.py
 
 ## 🐛 Troubleshooting
 
-### **Import Errors**
-```bash
-# If you see: ImportError: cannot import name 'Agent'
-# Solution: ensure your active virtualenv has `agent-framework` installed and you're running from that environment.
-```
+### **Using the right environment**
+
+- Make sure you’re running inside your virtualenv (`.venv`).
+- Quick check:
+   ```bash
+   python -m pip check
+   ```
+
+### **EasyOCR image error: “Invalid input type …”**
+
+If you see this while using the Advanced App, it usually means OCR was given a PIL Image object.
+The Advanced App in this repo converts the image to a NumPy array before calling EasyOCR.
+If you forked/modified it, ensure OCR uses a supported input type (file path/URL, bytes, or NumPy array).
+
+### **LLM Extraction App crash on Re-extract**
+
+If you see:
+`TypeError: <lambda>() takes 0 positional arguments but 1 was given`
+
+That happens when a fake uploaded-file object defines `getvalue` incorrectly.
+This repo stores `raw_bytes` in memory and uses `getvalue(self)` during re-extract.
 
 ### **Binary File Extraction Limitations**
 ```bash

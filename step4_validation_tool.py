@@ -28,15 +28,11 @@ Enhancement Suggestions:
     10. Create audit trail for all validation decisions
 """
 
-import asyncio
-from agent_framework import Agent, tool
-from client import get_chat_client
+from azure.ai.agents.models import FunctionTool, ToolSet
+
+from client import create_thread, ensure_agent, get_agents_client, run_agent_turn
 
 # Define validation tool with business logic
-@tool(
-    name="validate_invoice",
-    description="Validates invoice amount against approval thresholds and business rules"
-)
 def validate_invoice(amount: int, currency: str) -> str:
     """
     Validate invoice and determine approval status based on business rules.
@@ -85,7 +81,7 @@ def validate_invoice(amount: int, currency: str) -> str:
     #     "confidence": 0.95
     # }
 
-async def main():
+def main():
     """
     Main function demonstrating validation tool with business rules.
     
@@ -95,16 +91,29 @@ async def main():
         - Integrate with approval notification systems
         - Add validation metrics tracking
     """
-    # Create agent specialized in invoice validation
-    agent = Agent(
-        client=get_chat_client(),
+    agents_client = get_agents_client()
+
+    toolset = ToolSet()
+    toolset.add(FunctionTool({validate_invoice}))
+    # Required for local Python tool execution: allows the SDK to run tool calls and submit outputs.
+    agents_client.enable_auto_function_calls(toolset)
+
+    agent = ensure_agent(
+        agents_client,
+        name="InvoiceValidationAgent",
         instructions="Validate invoices according to company approval policies.",
-        tools=[validate_invoice]
+        toolset=toolset,
     )
 
-    # Test with a low-value invoice (should auto-approve)
-    result = await agent.run("Validate invoice with amount 1200 USD")
-    print(result.text)
+    thread_id = create_thread(agents_client)
+    text = run_agent_turn(
+        agents_client,
+        agent_id=agent.id,
+        thread_id=thread_id,
+        user_text="Validate invoice with amount 1200 USD",
+        toolset=toolset,
+    )
+    print(text)
     
     # Enhancement: Test with high-value invoice
     # result2 = await agent.run("Validate invoice with amount 50000 USD")
@@ -116,4 +125,4 @@ async def main():
 
 # Entry point for the script
 if __name__ == '__main__':
-    asyncio.run(main())
+    main()
