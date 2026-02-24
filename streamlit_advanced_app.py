@@ -100,7 +100,7 @@ def get_ocr_reader():
 def extract_text_from_image(image_bytes: bytes) -> str:
     """Extract text from image using OCR."""
     if not OCR_SUPPORT or not PIL_SUPPORT or not NUMPY_SUPPORT:
-        return "[OCR not available - install easyocr and pillow]"
+        return "[OCR not available - install easyocr, pillow, and numpy]"
 
     try:
         image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
