@@ -18,9 +18,8 @@ from typing import Optional
 @dataclass
 class AgentConfig:
     """Dynamic agent configuration"""
-    endpoint: str
-    deployment_name: str
-    api_version: str = "2024-02-01"
+    project_endpoint: str
+    model_deployment_name: str
     max_retries: int = 3
     timeout: int = 30
     temperature: float = 0.7
@@ -29,9 +28,8 @@ class AgentConfig:
     def from_env(cls) -> 'AgentConfig':
         """Load configuration from environment variables"""
         return cls(
-            endpoint=os.getenv('AZURE_OPENAI_ENDPOINT'),
-            deployment_name=os.getenv('AZURE_OPENAI_DEPLOYMENT') or os.getenv('AZURE_OPENAI_DEPLOYMENT_NAME'),
-            api_version=os.getenv('AZURE_OPENAI_API_VERSION', '2024-02-01'),
+            project_endpoint=os.getenv('FOUNDRY_PROJECT_ENDPOINT') or os.getenv('PROJECT_ENDPOINT') or os.getenv('AZURE_AI_PROJECT_ENDPOINT'),
+            model_deployment_name=os.getenv('MODEL_DEPLOYMENT_NAME') or os.getenv('AZURE_OPENAI_DEPLOYMENT') or os.getenv('AZURE_OPENAI_DEPLOYMENT_NAME'),
             max_retries=int(os.getenv('MAX_RETRIES', '3')),
             timeout=int(os.getenv('TIMEOUT', '30')),
             temperature=float(os.getenv('TEMPERATURE', '0.7'))

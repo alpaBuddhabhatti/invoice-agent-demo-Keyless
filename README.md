@@ -1,15 +1,59 @@
-# Invoice Processing Agent – Microsoft Foundry Demo
+# Invoice Processing Agent – Microsoft Foundry Demo (Keyless)
 
-A comprehensive demonstration of building AI-powered invoice processing agents using Microsoft Foundry (for model/project management) with the Agent Framework. This project shows progressive complexity from basic agents to multi-tool workflows with business logic.
+Demo project showing how to build AI-powered invoice processing agents using Microsoft Foundry (project + model deployment) with the Foundry SDKs (`azure-ai-projects` + `azure-ai-agents`).
+
+This repo is **keyless-only**: authentication uses Microsoft Entra ID (no API keys).
+
+## 🚀 Quickstart (new user)
+
+1. Create + activate a virtual environment
+   - Windows (PowerShell)
+     ```powershell
+     py -m venv .venv
+     .\.venv\Scripts\Activate.ps1
+     ```
+   - macOS/Linux
+     ```bash
+     python3 -m venv .venv
+     source .venv/bin/activate
+     ```
+
+2. Install dependencies
+   ```bash
+   python -m pip install -r requirements.txt
+   python -m pip check
+   ```
+
+3. Configure `.env`
+   ```env
+   FOUNDRY_PROJECT_ENDPOINT=https://<your-project>.services.ai.azure.com/api/projects/<project>
+   MODEL_DEPLOYMENT_NAME=<your-deployment-name>
+   ```
+
+4. Sign in (keyless auth)
+   ```bash
+   az login
+   ```
+
+5. Run the step demos
+   ```bash
+   python step1_basic_agent.py
+   python step2_thread_memory.py
+   python step3_invoice_tool.py
+   python step3_invoice_tools.py
+   python step4_validation_tool.py
+   ```
 
 ## 📋 Table of Contents
 
 - [Overview](#overview)
 - [Architecture](#architecture)
+- [Frameworks: Agent Framework vs Foundry Agents](#-frameworks-agent-framework-vs-foundry-agents)
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [Usage](#usage)
+- [Streamlit Demos](#streamlit-demos)
 - [Project Structure](#project-structure)
 - [Step-by-Step Guide](#step-by-step-guide)
 - [Enhancement Roadmap](#enhancement-roadmap)
@@ -49,8 +93,8 @@ This project demonstrates how to build intelligent invoice processing systems us
          │
          ▼
 ┌──────────────────────────────┐
-│ Model Deployment             │ (managed via Foundry)
-│  Chat Client (OpenAI-style)  │
+│ Foundry Project +            │
+│ Model Deployment             │
 └───────────────┬──────────────┘
          │
          ▼
@@ -64,14 +108,101 @@ This project demonstrates how to build intelligent invoice processing systems us
 └─────────────────┘
 ```
 
+## 🧩 Frameworks: Agent Framework vs Foundry Agents
+
+You may see two very similar-looking invoice demos:
+
+- **This repo** uses **Azure AI Foundry (project) + the Foundry Agents SDK** (`azure-ai-projects` + `azure-ai-agents`).
+- Another repo may use **`agent_framework`** (a Python library with `Agent(...)`, `@tool`, and `agent.run(...)`).
+
+Even though both are “agent apps”, they are different layers.
+
+### What’s the difference?
+
+**1) Where the agent runtime lives**
+
+- **`agent_framework` (library / in-process runtime)**
+   - The agent orchestration loop runs **inside your Python process**.
+   - Tools are normal Python callables; the framework invokes them locally.
+   - Memory/state is usually managed in your app (or whatever the framework stores in-process).
+
+- **Foundry managed Agents (`azure-ai-agents`)**
+   - Agents, threads, messages, and runs are **first-class service concepts**.
+   - You create an agent (gets an `agent_id`), create a thread, then create/process runs.
+   - Tool calling is integrated via a **toolset**; local function execution may require explicit enablement (example: `enable_auto_function_calls(...)`).
+
+**2) What Foundry adds (vs just calling a model endpoint)**
+
+Foundry provides a *project-centric* experience for deploying/organizing model deployments and typically pairs well with evaluation, tracing, and governance. It’s not “just auth”; it’s a higher-level platform concept around AI app development.
+
+**3) Keyless vs API keys is orthogonal**
+
+Keyless (Entra ID) vs API key is an authentication choice. Either style of app can be written to use keyless auth *if the underlying client supports it*. The bigger architectural split is **in-process library agent runtime** vs **managed Agents service runtime**.
+
+### Quick visual
+
+```
+In-process agent library (agent_framework)         Managed agent runtime (Foundry Agents)
+
+your_app.py                                        your_app.py
+   |                                                  |
+   | Agent.run(...)                                   | AgentsClient.create_agent(...)
+   |  - framework plans + loops                       | AgentsClient.threads.create(...)
+   |  - framework invokes tools locally               | AgentsClient.runs.create_and_process(...)
+   v                                                  v
+Model API (chat)                                 Foundry Agent Run (service)
+                                                                            |  - may request tool calls
+                                                                            v
+                                                                        Tool execution + submit outputs
+```
+
+### How to recognize which one you’re looking at
+
+- **Foundry managed Agents (this repo)**
+   - See `client.py`: uses `AIProjectClient` / `AgentsClient`, and functions like `ensure_agent(...)`, `create_thread(...)`, `run_agent_turn(...)`.
+   - See `step3_invoice_tools.py`: uses `ToolSet` + `FunctionTool` and enables local tool execution via `agents_client.enable_auto_function_calls(toolset)`.
+   - Streamlit apps store `agent.id` and call runs/threads via `run_agent_turn(...)`.
+
+- **agent_framework repo (library runtime)**
+   - You’ll see `from agent_framework import Agent, tool`.
+   - Agents are created like `Agent(client=..., tools=[...])` and run with `await agent.run(...)`.
+
+### Proof by imports (quick check)
+
+If you’re unsure which style a repo is using, check for these *signature imports*.
+
+**Foundry managed Agents (this repo)**
+
+```python
+# Foundry Project + managed Agents clients
+from azure.ai.projects import AIProjectClient
+from azure.ai.agents import AgentsClient
+
+# Toolsets for local function tools
+from azure.ai.agents.models import FunctionTool, ToolSet
+```
+
+**agent_framework (library runtime + Azure OpenAI client)**
+
+```python
+from agent_framework import Agent, tool
+from agent_framework.azure import AzureOpenAIChatClient
+```
+
+### Which should you use?
+
+- Choose **Foundry managed Agents** when you want a more “platform-native” agent lifecycle (agents/threads/runs), and easier alignment with enterprise app patterns.
+- Choose **agent_framework** when you want the simplest Python-first experience for demos/prototyping where you control the loop in-process.
+
 ## 📋 Prerequisites
 
-- **Python**: 3.8 or higher (3.11 recommended)
+- **Python**: 3.11+ recommended
 - **Microsoft Foundry + model endpoint**:
    - A model deployment (created/managed in Microsoft Foundry)
    - A compatible endpoint and Entra ID (keyless) access to call that deployment
 - **Libraries** (installed via `requirements.txt`):
-   - `agent-framework`
+   - `azure-ai-projects`
+   - `azure-ai-agents`
    - `python-dotenv`
    - `streamlit` (only needed for the Streamlit demos)
 
@@ -80,7 +211,7 @@ This project demonstrates how to build intelligent invoice processing systems us
 1. **Clone the repository**
    ```bash
    git clone <repository-url>
-   cd invoice-agent-demo_keyless
+   cd invoice-agent-demo-Keyless
    ```
 
 2. **Create virtual environment**
@@ -101,7 +232,19 @@ This project demonstrates how to build intelligent invoice processing systems us
 4. **Install dependencies**
    ```bash
    pip install -r requirements.txt
+   pip check
    ```
+
+### Windows on ARM notes
+
+Some Python packages may not provide native `win_arm64` wheels.
+If you see install errors related to building `cryptography` (Rust toolchain), use one of these options:
+
+- Install and use **Python 3.11 x64** (often has prebuilt wheels available).
+- Or force a wheel-only install for `cryptography`:
+  ```bash
+  pip install "cryptography" --only-binary=:all:
+  ```
 
 ## ⚙️ Configuration
 
@@ -110,30 +253,25 @@ This project demonstrates how to build intelligent invoice processing systems us
 Create a `.env` file in the project root:
 
 ```env
-# Model Endpoint Configuration
-AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
-AZURE_OPENAI_DEPLOYMENT=gpt-4.1-mini
+# Foundry project configuration
+FOUNDRY_PROJECT_ENDPOINT=https://<your-project>.services.ai.azure.com/api/projects/<project>
 
-# Optional: Advanced Configuration
-AZURE_OPENAI_API_VERSION=2024-02-01
-LOG_LEVEL=INFO
+# Model deployment name configured for your project
+MODEL_DEPLOYMENT_NAME=gpt-4o-mini
 ```
 
 Notes:
-- `AZURE_OPENAI_DEPLOYMENT` is the preferred variable name. For compatibility, the code also accepts `AZURE_OPENAI_DEPLOYMENT_NAME`.
-- The endpoint must be a resource-style model endpoint (for this repo’s default client: `https://<resource>.openai.azure.com/`). Microsoft Foundry *project* URLs are different and won’t work as `AZURE_OPENAI_ENDPOINT`.
+- `FOUNDRY_PROJECT_ENDPOINT` is the preferred variable name. For compatibility, the code also accepts `PROJECT_ENDPOINT` and `AZURE_AI_PROJECT_ENDPOINT`.
+- `MODEL_DEPLOYMENT_NAME` is the preferred variable name. For compatibility, the code also accepts `AZURE_OPENAI_DEPLOYMENT` and `AZURE_OPENAI_DEPLOYMENT_NAME`.
 
 #### Keyless authentication (recommended)
 
 This repo uses keyless auth via Microsoft Entra ID.
 
-1. Ensure your identity has access to the Azure OpenAI resource (RBAC): assign the **Cognitive Services OpenAI User** role on the Azure OpenAI resource (or resource group).
+1. Ensure your identity has access to the Foundry-backed model resource (RBAC): assign the **Cognitive Services OpenAI User** role on the underlying Azure AI Services / OpenAI model resource (or resource group), depending on how your Foundry project is configured.
 2. Authenticate:
    - Local dev: `az login` (or VS Code Azure sign-in)
    - Azure compute: enable Managed Identity (system-assigned or user-assigned). For user-assigned MI, set `AZURE_CLIENT_ID`.
-
-Optional:
-- `AZURE_OPENAI_TOKEN_ENDPOINT` (defaults to `https://cognitiveservices.azure.com/.default`).
 
 ### Security Best Practices
 
@@ -180,6 +318,17 @@ Each step file demonstrates different capabilities:
    ```
    Implements business rules and approval thresholds.
 
+### Streamlit Demos
+
+There are three Streamlit apps. See [STREAMLIT_APPS_GUIDE.md](STREAMLIT_APPS_GUIDE.md) for details.
+
+Run (recommended from the virtualenv):
+```bash
+python -m streamlit run streamlit_advanced_app.py
+python -m streamlit run streamlit_llm_extraction_app.py
+python -m streamlit run streamlit_multi_agent_app.py
+```
+
 ## 📁 Project Structure
 
 ```
@@ -209,8 +358,13 @@ invoice-agent-demo_keyless/
 
 **Example**:
 ```python
-agent = Agent(client=get_chat_client(), instructions='Summarize invoice data.')
-result = await agent.run('Invoice INV-1001 from Contoso for 1200 USD')
+from client import create_thread, ensure_agent, get_agents_client, run_agent_turn
+
+agents_client = get_agents_client()
+agent = ensure_agent(agents_client, name="BasicInvoiceAgent", instructions="Summarize invoice data.")
+thread_id = create_thread(agents_client)
+text = run_agent_turn(agents_client, agent_id=agent.id, thread_id=thread_id, user_text="Invoice INV-1001 from Contoso for 1200 USD")
+print(text)
 ```
 
 ### Step 2: Thread Memory
@@ -224,9 +378,14 @@ result = await agent.run('Invoice INV-1001 from Contoso for 1200 USD')
 
 **Example**:
 ```python
-thread = agent.get_new_thread()
-await agent.run('Invoice from Contoso for 1200 USD', thread=thread)
-result = await agent.run('What is the total amount?', thread=thread)
+from client import create_thread, ensure_agent, get_agents_client, run_agent_turn
+
+agents_client = get_agents_client()
+agent = ensure_agent(agents_client, name="InvoiceQnAAgent", instructions="Answer invoice questions.")
+thread_id = create_thread(agents_client)
+run_agent_turn(agents_client, agent_id=agent.id, thread_id=thread_id, user_text="Invoice from Contoso for 1200 USD")
+text = run_agent_turn(agents_client, agent_id=agent.id, thread_id=thread_id, user_text="What is the total amount?")
+print(text)
 ```
 
 ### Step 3: Tools
@@ -239,13 +398,20 @@ result = await agent.run('What is the total amount?', thread=thread)
 - Structured data extraction
 - Multi-tool orchestration
 
-**Example**:
+**Example (this repo’s SDK pattern)**:
 ```python
-@tool(name="extract_invoice", description="Extract invoice data")
-def extract_invoice(text: str) -> dict:
-    return {"vendor": "Contoso", "amount": 1200, "currency": "USD"}
+from azure.ai.agents.models import FunctionTool, ToolSet
+from client import get_agents_client
 
-agent = Agent(client=get_chat_client(), tools=[extract_invoice])
+def extract_invoice(text: str) -> dict:
+   return {"vendor": "Contoso", "amount": 1200, "currency": "USD"}
+
+agents_client = get_agents_client()
+toolset = ToolSet()
+toolset.add(FunctionTool({extract_invoice}))
+
+# Required: lets the SDK execute local Python functions during runs.
+agents_client.enable_auto_function_calls(toolset)
 ```
 
 ### Step 4: Business Logic
@@ -345,6 +511,15 @@ def validate_invoice(amount: int, currency: str) -> str:
 - **Solution**: Monitor token usage
 - Optimize prompts for brevity
 - Consider using smaller models for simple tasks
+
+**Issue**: `Import "azure.ai.agents.models._patch" could not be resolved`
+- **Solution**: This repo uses the public imports: `from azure.ai.agents.models import FunctionTool, ToolSet`.
+
+**Issue**: Tool calls not executing (agent says it can’t call functions)
+- **Solution**: Ensure your code calls `agents_client.enable_auto_function_calls(toolset)` before running.
+
+**Issue**: `cryptography` install fails on Windows ARM
+- **Solution**: Use Python 3.11 x64, or install `cryptography` with `--only-binary=:all:` as described in Installation.
 
 ### Debug Mode
 

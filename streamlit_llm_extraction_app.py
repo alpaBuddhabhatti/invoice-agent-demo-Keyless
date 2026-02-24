@@ -50,11 +50,14 @@ try:
 except ImportError:
     PDF_SUPPORT = False
 
-from agent_framework import Agent
-from client import get_chat_client
+from client import create_thread, ensure_agent, get_agents_client, run_agent_turn
 
 
 # ==================== Utility Functions ====================
+
+@st.cache_resource
+def _agents_client():
+    return get_agents_client()
 
 def _run_async(coro):
     """Run an async coroutine safely from Streamlit."""
@@ -89,17 +92,17 @@ def get_file_media_type(file_type: str, file_name: str) -> str:
         return "text/plain"
 
 
-def get_llm_agent() -> Agent:
-    """Create LLM agent for document extraction and analysis."""
-    if "llm_agent" not in st.session_state:
-        client = get_chat_client()
-        st.session_state.llm_agent = Agent(
-            client=client,
+def get_llm_agent_id() -> str:
+    """Get or create the Foundry agent used for extraction/analysis."""
+    if "llm_agent_id" not in st.session_state:
+        agents_client = _agents_client()
+        agent = ensure_agent(
+            agents_client,
             name="ExtractionAgent",
             instructions=(
                 "You are an expert document extraction and analysis system.\n"
                 "Your role is to:\n"
-                "1. Extract ALL important information from documents using vision understanding\n"
+                "1. Extract ALL important information from documents\n"
                 "2. Identify document type, structure, and key fields\n"
                 "3. Extract data in structured formats (JSON, tables)\n"
                 "4. Answer detailed questions about document content\n"
@@ -113,21 +116,23 @@ def get_llm_agent() -> Agent:
                 "- Flag any ambiguities or missing information"
             ),
         )
-    return st.session_state.llm_agent
+        st.session_state.llm_agent_id = agent.id
+    return st.session_state.llm_agent_id
 
 
 def get_thread():
-    """Get or create conversation thread."""
-    if "analysis_thread" not in st.session_state:
-        st.session_state.analysis_thread = get_llm_agent().get_new_thread()
-    return st.session_state.analysis_thread
+    """Get or create conversation thread (Foundry thread id)."""
+    if "analysis_thread_id" not in st.session_state:
+        st.session_state.analysis_thread_id = create_thread(_agents_client())
+    return st.session_state.analysis_thread_id
 
 
 def extract_with_llm_vision(file_bytes: bytes, file_type: str, file_name: str, 
                            use_thread: bool = True) -> str:
     """Extract content from file using LLM vision capabilities."""
-    agent = get_llm_agent()
-    thread = get_thread() if use_thread else None
+    agents_client = _agents_client()
+    agent_id = get_llm_agent_id()
+    thread_id = get_thread() if use_thread else create_thread(agents_client)
     
     # Prepare the file data for LLM
     media_type = get_file_media_type(file_type, file_name)
@@ -170,25 +175,25 @@ def extract_with_llm_vision(file_bytes: bytes, file_type: str, file_name: str,
             "6. Any ambiguities or unclear sections"
         )
     
-    if thread:
-        result = _run_async(agent.run(prompt, thread=thread))
-    else:
-        result = _run_async(agent.run(prompt))
-    
-    return result.text
+    return run_agent_turn(
+        agents_client,
+        agent_id=agent_id,
+        thread_id=thread_id,
+        user_text=prompt,
+    )
 
 
 def analyze_with_llm(prompt: str, use_thread: bool = True) -> str:
     """Run LLM analysis."""
-    agent = get_llm_agent()
-    thread = get_thread() if use_thread else None
-    
-    if thread:
-        result = _run_async(agent.run(prompt, thread=thread))
-    else:
-        result = _run_async(agent.run(prompt))
-    
-    return result.text
+    agents_client = _agents_client()
+    agent_id = get_llm_agent_id()
+    thread_id = get_thread() if use_thread else create_thread(agents_client)
+    return run_agent_turn(
+        agents_client,
+        agent_id=agent_id,
+        thread_id=thread_id,
+        user_text=prompt,
+    )
 
 
 # ==================== File Processing ====================
@@ -203,6 +208,8 @@ def process_file_with_llm(uploaded_file) -> dict:
         "name": file_name,
         "type": file_type,
         "size": len(raw_bytes),
+        # Keep the original bytes so "Re-extract" can run without re-upload.
+        "raw_bytes": raw_bytes,
         "extracted_content": "",
         "preview": "",
         "extraction_status": "pending"
@@ -333,7 +340,8 @@ with tabs[0]:
                                 type('obj', (object,), {
                                     'type': doc_data['type'],
                                     'name': doc_name,
-                                    'getvalue': lambda: b''  # Would need original bytes
+                                    # Define as a real method (accepts self) because it's a class attribute.
+                                    'getvalue': lambda self: doc_data.get('raw_bytes', b'')
                                 })()
                             )
                             st.session_state.documents[doc_name] = doc_data
